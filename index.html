@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cyber Target - 2D FPS Range</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- HUD Superior / Marcadores -->
+  <header class="game-hud">
+    <div class="hud-box">
+      <span class="hud-label">SCORE</span>
+      <span class="hud-val" id="score">000000</span>
+    </div>
+    <div class="hud-box center-title">
+      <h1>CYBER TARGET 2D</h1>
+      <span class="sub-title">FPS PRACTICE RANGE</span>
+    </div>
+    <div class="hud-box">
+      <span class="hud-label">TIEMPO</span>
+      <span class="hud-val timer-val" id="timer">00:30</span>
+    </div>
+  </header>
+
+  <!-- Barra de Estado / Vida del Objetivo -->
+  <div class="boss-health-wrapper">
+    <div class="boss-info">
+      <span id="target-status">TARGET STATUS: ACTIVE</span>
+      <span id="speed-display">VELOCIDAD: 1X</span>
+      <span id="health-text">100 / 100</span>
+    </div>
+    <div class="health-track">
+      <div class="health-fill" id="health-bar"></div>
+    </div>
+  </div>
+
+  <!-- Arena de Juego / Visor a Pantalla Completa -->
+  <main class="arena-container" id="arenaBox">
+    <!-- Retícula Central Estilo FPS -->
+    <div class="fps-crosshair">
+      <div class="ch-line top"></div>
+      <div class="ch-line bottom"></div>
+      <div class="ch-line left"></div>
+      <div class="ch-line right"></div>
+      <div class="ch-dot"></div>
+    </div>
+
+    <!-- Bot Objetivo Interactiva -->
+    <div id="targetBot" class="target-bot">
+      <div class="bot-head" id="botHead" title="Headshot Zone"></div>
+      <div class="bot-body" id="botBody" title="Body Zone"></div>
+      <div class="bot-ring"></div>
+    </div>
+
+    <!-- Capa interactiva de fallos -->
+    <div class="shoot-layer" id="shootLayer"></div>
+
+    <!-- Pantalla de Game Over Overlaid -->
+    <div id="gameOverScreen" class="game-over-modal hidden-modal">
+      <div class="modal-content">
+        <h2>TIME OVER // MISSION COMPLETE</h2>
+        <div class="final-stats">
+          <p>PUNTAJE FINAL: <span id="finalScore">0</span></p>
+          <p>PRECISIÓN: <span id="finalAccuracy">0%</span></p>
+          <p>RANGO TÁCTICO: <span id="tacticalRank">S-RANK</span></p>
+        </div>
+        <button class="arcade-btn modal-btn" onclick="resetGame()">🎮 VOLVER A JUGAR</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Controles Inferiores -->
+  <footer class="game-footer">
+    <button class="arcade-btn" onclick="increaseSpeed()">⚡ AUMENTAR VELOCIDAD</button>
+    <button class="arcade-btn reset-btn" onclick="resetGame()">🔄 REINICIAR SISTEMA</button>
+  </footer>
+
+  <!-- Lógica del Juego -->
+  <script>
+    let score = 0;
+    let shots = 0;
+    let hits = 0;
+    let health = 100;
+    const maxHealth = 100;
+
+    // Temporizador y Estado del Juego
+    let timeLeft = 30; // Tiempo en segundos
+    let gameActive = true;
+    let timerInterval = null;
+
+    // Configuración de Velocidad
+    let speedLevel = 1;
+    const maxSpeedLevel = 5;
+    let cycleTimeoutId = null;
+
+    const scoreEl = document.getElementById('score');
+    const timerEl = document.getElementById('timer');
+    const healthBar = document.getElementById('health-bar');
+    const healthText = document.getElementById('health-text');
+    const arenaBox = document.getElementById('arenaBox');
+    const targetBot = document.getElementById('targetBot');
+    const botHead = document.getElementById('botHead');
+    const botBody = document.getElementById('botBody');
+    const shootLayer = document.getElementById('shootLayer');
+    const targetStatus = document.getElementById('target-status');
+    const speedDisplay = document.getElementById('speed-display');
+
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScore = document.getElementById('finalScore');
+    const finalAccuracy = document.getElementById('finalAccuracy');
+    const tacticalRank = document.getElementById('tacticalRank');
+
+    // Manejo del Temporizador
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      
+      timerInterval = setInterval(() => {
+        if (!gameActive) return;
+
+        timeLeft--;
+        const formattedSecs = String(timeLeft).padStart(2, '0');
+        timerEl.textContent = `00:${formattedSecs}`;
+
+        // Alerta visual los últimos 5 segundos
+        if (timeLeft <= 5) {
+          timerEl.classList.add('timer-warning');
+        } else {
+          timerEl.classList.remove('timer-warning');
+        }
+
+        if (timeLeft <= 0) {
+          endGame();
+        }
+      }, 1000);
+    }
+
+    function endGame() {
+      gameActive = false;
+      clearInterval(timerInterval);
+      if (cycleTimeoutId) clearTimeout(cycleTimeoutId);
+
+      targetBot.classList.add('hidden-bot');
+      targetStatus.textContent = "TARGET STATUS: OFFLINE";
+
+      const acc = shots > 0 ? Math.round((hits / shots) * 100) : 0;
+      finalScore.textContent = score;
+      finalAccuracy.textContent = acc + '%';
+
+      // Asignar rango táctico según la precisión y puntaje
+      if (acc >= 85 && score >= 3000) tacticalRank.textContent = "S+ RADIANT";
+      else if (acc >= 70 && score >= 1500) tacticalRank.textContent = "A- DIAMOND";
+      else if (acc >= 50) tacticalRank.textContent = "B- GOLD";
+      else tacticalRank.textContent = "C- ROOKIE";
+
+      gameOverScreen.classList.remove('hidden-modal');
+    }
+
+    // Cambiar de posición aleatoria al Bot
+    function moveBot() {
+      const rect = arenaBox.getBoundingClientRect();
+      const botWidth = 80;
+      const botHeight = 120;
+
+      const maxX = rect.width - botWidth;
+      const maxY = rect.height - botHeight;
+
+      const randomX = Math.floor(Math.random() * Math.max(0, maxX));
+      const randomY = Math.floor(Math.random() * Math.max(0, maxY));
+
+      targetBot.style.left = randomX + 'px';
+      targetBot.style.top = randomY + 'px';
+    }
+
+    // Ocultación y reaparición aleatoria del Bot
+    function cycleBot() {
+      if (!gameActive) return;
+      if (cycleTimeoutId) clearTimeout(cycleTimeoutId);
+
+      targetBot.classList.add('hidden-bot');
+      targetStatus.textContent = "TARGET STATUS: REPOSITIONING...";
+
+      const repositionDelay = Math.max(150, 600 - (speedLevel - 1) * 100);
+
+      setTimeout(() => {
+        if (!gameActive) return;
+        moveBot();
+        targetBot.classList.remove('hidden-bot');
+        targetStatus.textContent = "TARGET STATUS: ACTIVE";
+      }, repositionDelay);
+
+      const baseInterval = (Math.random() * 1500 + 1200) / (1 + (speedLevel - 1) * 0.35);
+
+      cycleTimeoutId = setTimeout(cycleBot, baseInterval);
+    }
+
+    // Aumentar velocidad
+    function increaseSpeed() {
+      if (!gameActive) return;
+      if (speedLevel < maxSpeedLevel) {
+        speedLevel++;
+      } else {
+        speedLevel = 1;
+      }
+      speedDisplay.textContent = `VELOCIDAD: ${speedLevel}X`;
+      cycleBot();
+    }
+
+    // Audio sintetizado
+    function playLaserFX(isCrit) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = isCrit ? 'square' : 'sawtooth';
+        osc.frequency.setValueAtTime(isCrit ? 1000 : 500, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.1);
+
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.11);
+      } catch(e){}
+    }
+
+    // Disparo Cabeza
+    botHead.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (gameActive) processHit(e, true);
+    });
+
+    // Disparo Cuerpo
+    botBody.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (gameActive) processHit(e, false);
+    });
+
+    // Disparo Fallido
+    shootLayer.addEventListener('click', (e) => {
+      if (!gameActive) return;
+      shots++;
+      playLaserFX(false);
+      updateUI();
+    });
+
+    function processHit(e, isHeadshot) {
+      if (targetBot.classList.contains('hidden-bot') || !gameActive) return;
+
+      shots++;
+      hits++;
+
+      const damage = isHeadshot ? 50 : 20;
+      const pts = (isHeadshot ? 500 : 150) * speedLevel;
+
+      score += pts;
+      health = Math.max(0, health - damage);
+
+      playLaserFX(isHeadshot);
+
+      const rect = arenaBox.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      triggerImpact(x, y, isHeadshot);
+      triggerDamageText(x, y, damage, isHeadshot);
+
+      arenaBox.classList.remove('screen-shake');
+      void arenaBox.offsetWidth;
+      arenaBox.classList.add('screen-shake');
+
+      if (health <= 0) {
+        score += 1000 * speedLevel;
+        health = maxHealth;
+        moveBot();
+      }
+
+      updateUI();
+    }
+
+    function updateUI() {
+      scoreEl.textContent = String(score).padStart(6, '0');
+      const pct = (health / maxHealth) * 100;
+      healthBar.style.width = pct + '%';
+      healthText.textContent = `${health} / ${maxHealth}`;
+    }
+
+    function triggerImpact(x, y, isCrit) {
+      const spark = document.createElement('div');
+      spark.className = isCrit ? 'impact-fx crit-fx' : 'impact-fx';
+      spark.style.left = x + 'px';
+      spark.style.top = y + 'px';
+      arenaBox.appendChild(spark);
+      setTimeout(() => spark.remove(), 350);
+    }
+
+    function triggerDamageText(x, y, dmg, isCrit) {
+      const txt = document.createElement('div');
+      txt.className = isCrit ? 'dmg-popup crit-popup' : 'dmg-popup';
+      txt.textContent = isCrit ? `-${dmg} HEADSHOT!` : `-${dmg}`;
+      txt.style.left = x + 'px';
+      txt.style.top = y + 'px';
+      arenaBox.appendChild(txt);
+      setTimeout(() => txt.remove(), 600);
+    }
+
+    function resetGame() {
+      score = 0;
+      shots = 0;
+      hits = 0;
+      speedLevel = 1;
+      timeLeft = 30;
+      gameActive = true;
+
+      speedDisplay.textContent = 'VELOCIDAD: 1X';
+      timerEl.textContent = '00:30';
+      timerEl.classList.remove('timer-warning');
+      gameOverScreen.classList.add('hidden-modal');
+
+      health = maxHealth;
+      moveBot();
+      cycleBot();
+      startTimer();
+      updateUI();
+    }
+
+    // Iniciar Juego al cargar
+    resetGame();
+  </script>
+</body>
+</html>
